@@ -2,11 +2,21 @@ from services.llm.base import (
     EvaluationResult,
     LLMProvider,
     NegotiationContext,
+    TurnResult,
 )
 
 
 class MockLLMProvider(LLMProvider):
     """Deterministic provider used until a real inference endpoint is configured."""
+
+    async def generate_turn(
+        self,
+        context: NegotiationContext,
+    ) -> TurnResult:
+        return TurnResult(
+            opponent_reply=await self.generate_opponent_reply(context),
+            evaluation=await self.evaluate_user_message(context),
+        )
 
     async def generate_opponent_reply(
         self,

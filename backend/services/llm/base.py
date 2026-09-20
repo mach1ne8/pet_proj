@@ -34,6 +34,11 @@ class EvaluationResult(BaseModel):
     coach_message: str
 
 
+class TurnResult(BaseModel):
+    opponent_reply: str = Field(min_length=1)
+    evaluation: EvaluationResult
+
+
 def build_private_system_prompt(context: NegotiationContext) -> str:
     """Build the private prompt sent only from backend to the LLM provider."""
     goals = ", ".join(context.user_goals)
@@ -52,6 +57,13 @@ def build_private_system_prompt(context: NegotiationContext) -> str:
 
 
 class LLMProvider(ABC):
+    @abstractmethod
+    async def generate_turn(
+        self,
+        context: NegotiationContext,
+    ) -> TurnResult:
+        raise NotImplementedError
+
     @abstractmethod
     async def generate_opponent_reply(
         self,

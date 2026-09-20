@@ -112,7 +112,8 @@ async def process_user_message(
     )
 
     provider = get_llm_provider()
-    evaluation = await provider.evaluate_user_message(context)
+    turn = await provider.generate_turn(context)
+    evaluation = turn.evaluation
     state = await get_session_state(db, session_id)
     if state is None:
         state = create_initial_state(scenario)
@@ -120,8 +121,7 @@ async def process_user_message(
         db.add(state)
     deltas = apply_evaluation(state, evaluation)
     db.add(create_metric_event(session_id, state, deltas))
-    opponent_text = await provider.generate_opponent_reply(context)
-    opponent_message.content = opponent_text
+    opponent_message.content = turn.opponent_reply
     await db.commit()
 
     return opponent_message.content, state
