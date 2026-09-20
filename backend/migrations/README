@@ -1,0 +1,7 @@
+Alembic migration environment for Negotiation Arena.
+
+The existing production/demo database was created before Alembic was introduced.
+When adopting this first migration on that database, run `alembic stamp head`
+after verifying that the existing schema matches the initial revision. Do not run
+`alembic upgrade head` against that database, because the initial revision is
+intended to create the tables on a new empty database.
