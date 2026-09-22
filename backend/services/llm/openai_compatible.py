@@ -33,7 +33,11 @@ class OpenAICompatibleProvider(LLMProvider):
         payload: dict[str, object] = {
             "model": LLM_MODEL,
             "messages": messages,
-            "temperature": 0.7,
+            "temperature": 0.85,
+            "top_p": 0.9,
+            "presence_penalty": 0.25,
+            "frequency_penalty": 0.45,
+            "max_tokens": 220,
         }
         if response_format is not None:
             payload["response_format"] = response_format
@@ -106,7 +110,34 @@ class OpenAICompatibleProvider(LLMProvider):
             messages,
             response_format={"type": "json_object"},
         )
-        return TurnResult.model_validate_json(raw_result)
+        result = TurnResult.model_validate_json(raw_result)
+
+        previous_replies = {
+            message.content.strip()
+            for message in context.transcript
+            if message.role == "assistant"
+        }
+        if result.opponent_reply.strip() in previous_replies:
+            repair_messages = [
+                *messages,
+                {
+                    "role": "system",
+                    "content": (
+                        "The generated opponent_reply was identical to a previous "
+                        "reply. Regenerate the complete JSON with a genuinely "
+                        "different wording and a concrete response to the latest "
+                        "user message."
+                    ),
+                },
+            ]
+            result = TurnResult.model_validate_json(
+                await self._complete(
+                    repair_messages,
+                    response_format={"type": "json_object"},
+                )
+            )
+
+        return result
 
     async def evaluate_user_message(
         self,

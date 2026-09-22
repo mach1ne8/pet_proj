@@ -17,13 +17,6 @@ from services.state import (
 )
 
 
-MOCK_OPPONENT_RESPONSE = (
-    "Понимаю вашу позицию. "
-    "Но цена для нас остаётся ключевым фактором. "
-    "Какие условия вы можете предложить?"
-)
-
-
 async def create_negotiation_session(
     db: AsyncSession,
     scenario_id: uuid.UUID | None = None,
@@ -83,13 +76,8 @@ async def process_user_message(
         role="user",
         content=content,
     )
-    opponent_message = Message(
-        session_id=session_id,
-        role="assistant",
-        content=MOCK_OPPONENT_RESPONSE,
-    )
-
-    db.add_all([user_message, opponent_message])
+    db.add(user_message)
+    await db.flush()
 
     history = await get_messages(db, session_id)
     context = NegotiationContext(
@@ -106,8 +94,7 @@ async def process_user_message(
                 content=item.content,
             )
             for item in history
-        ]
-        + [ConversationMessage(role="user", content=content)],
+        ],
         latest_user_message=content,
     )
 
@@ -121,7 +108,13 @@ async def process_user_message(
         db.add(state)
     deltas = apply_evaluation(state, evaluation)
     db.add(create_metric_event(session_id, state, deltas))
-    opponent_message.content = turn.opponent_reply
+
+    opponent_message = Message(
+        session_id=session_id,
+        role="assistant",
+        content=turn.opponent_reply,
+    )
+    db.add(opponent_message)
     await db.commit()
 
     return opponent_message.content, state

@@ -52,7 +52,12 @@ def build_private_system_prompt(context: NegotiationContext) -> str:
         f"BATNA: {context.batna}\n"
         f"User goals: {goals}\n"
         "Respond as the character in Russian. Keep the reply concise, "
-        "natural, and consistent with the negotiation state."
+        "natural, and consistent with the negotiation state. Every turn "
+        "must address the latest user message directly and reference at "
+        "least one concrete detail from it. Never repeat a previous assistant "
+        "reply verbatim. Avoid generic canned openings. If the user goes "
+        "off-topic, briefly redirect them to the negotiation while staying "
+        "in character."
     )
 
 
