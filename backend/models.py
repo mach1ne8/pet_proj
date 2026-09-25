@@ -3,8 +3,10 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
     Uuid,
@@ -68,6 +70,20 @@ class NegotiationSession(Base):
     final_score: Mapped[int | None] = mapped_column(
         nullable=True,
     )
+
+    difficulty: Mapped[str] = mapped_column(String(16), nullable=False, default="analyst")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hints_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    hint_history: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    batna_revealed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    parent_session_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("negotiation_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    fork_from_turn: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     messages: Mapped[list["Message"]] = relationship(
         back_populates="session",
@@ -184,6 +200,9 @@ class SessionResult(Base):
     strengths: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     mistakes: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     recommendations: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    key_moments: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    skills: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False, default=dict)
+    analysis_status: Mapped[str] = mapped_column(String(16), nullable=False, default="ready")
     completed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

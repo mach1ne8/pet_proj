@@ -1,6 +1,7 @@
 import uuid
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -25,6 +26,9 @@ class SessionResultResponse(BaseModel):
     strengths: list[str]
     mistakes: list[str]
     recommendations: list[str]
+    key_moments: list[str] = Field(default_factory=list)
+    skills: dict[str, int] = Field(default_factory=dict)
+    analysis_status: Literal["pending", "ready", "failed"] = "ready"
     completed_at: datetime
 
 
@@ -32,6 +36,15 @@ class SessionResponse(BaseModel):
     session_id: uuid.UUID
     status: str = "active"
     scenario_id: uuid.UUID | None = None
+    difficulty: str = "analyst"
+    expires_at: datetime | None = None
+    hints_used: int = 0
+    hint_history: list[str] = Field(default_factory=list)
+    batna_revealed: bool = False
+    batna_text: str | None = None
+    notes: str = ""
+    parent_session_id: uuid.UUID | None = None
+    fork_from_turn: int | None = None
     state: SessionStateResponse | None = None
     result: SessionResultResponse | None = None
     messages: list[MessageResponse]
@@ -39,6 +52,30 @@ class SessionResponse(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     scenario_id: uuid.UUID | None = None
+    difficulty: Literal["beginner", "analyst", "advanced", "expert"] = "analyst"
+
+
+class ForkSessionRequest(BaseModel):
+    turn_count: int = Field(ge=1)
+    notes: str | None = Field(default=None, max_length=5000)
+
+
+class NotesRequest(BaseModel):
+    notes: str = Field(max_length=5000)
+
+
+class HintResponse(BaseModel):
+    message: str
+    hints_used: int
+    history: list[str] = Field(default_factory=list)
+
+
+class SuggestionRequest(BaseModel):
+    tactic: Literal["open_question", "interests", "facts", "compromise"]
+
+
+class SuggestionResponse(BaseModel):
+    message: str
 
 
 class ScenarioSummary(BaseModel):
@@ -63,3 +100,5 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     message: str
     state: SessionStateResponse
+    batna_revealed: bool = False
+    batna_text: str | None = None

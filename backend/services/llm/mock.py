@@ -1,13 +1,38 @@
+from textwrap import shorten
+
 from services.llm.base import (
+    ConversationMessage,
     EvaluationResult,
     LLMProvider,
     NegotiationContext,
+    RoundSummary,
     TurnResult,
 )
 
 
 class MockLLMProvider(LLMProvider):
     """Deterministic provider used until a real inference endpoint is configured."""
+
+    async def suggest_user_message(self, context: NegotiationContext, tactic: str) -> str:
+        topic = "цене" if any("цен" in item.content.lower() for item in context.transcript[-3:]) else "условиях поставки"
+        suggestions = {
+            "open_question": f"Какие условия по {topic} для вас наиболее важны и почему?",
+            "interests": f"Что для вас стоит за позицией по {topic}: сроки, объём или предсказуемость?",
+            "facts": "Если мы зафиксируем объём и график заказов, сможем ли обсудить более выгодную цену?",
+            "compromise": "Давайте зафиксируем объём на квартал в обмен на поэтапное снижение цены.",
+        }
+        return suggestions[tactic]
+
+    async def summarize_round(self, transcript: list[ConversationMessage], score: int) -> RoundSummary:
+        user_messages = [item.content for item in transcript if item.role == "user"]
+        if not user_messages:
+            return RoundSummary(strengths=[], mistakes=[], key_moments=[], recommendations=[])
+        return RoundSummary(
+            strengths=["Вы поддержали разговор и обозначили свою позицию."],
+            mistakes=["Стоило яснее уточнить ограничения другой стороны."],
+            key_moments=[f"Ваш первый ход: {shorten(user_messages[0], width=205, placeholder='…')}"],
+            recommendations=["Задайте открытый вопрос об интересах и предложите обмен уступками."],
+        )
 
     async def generate_turn(
         self,

@@ -8,12 +8,25 @@ def clamp_metric(value: int) -> int:
     return max(0, min(100, value))
 
 
-def create_initial_state(scenario: Scenario) -> SessionState:
+DIFFICULTY_METRIC_OFFSETS = {
+    "beginner": {"trust": 5, "interest": 5, "openness": 5, "irritation": -10, "tension": -10, "risk": -10},
+    "analyst": {"trust": -12, "interest": -20, "openness": -15, "irritation": 10, "tension": 10, "risk": 10},
+    "advanced": {"trust": -22, "interest": -22, "openness": -22, "irritation": 20, "tension": 18, "risk": 20},
+    "expert": {"trust": -30, "interest": -32, "openness": -28, "irritation": 28, "tension": 25, "risk": 28},
+}
+
+
+def initial_metrics_for(scenario: Scenario, difficulty: str) -> dict[str, int]:
+    offsets = DIFFICULTY_METRIC_OFFSETS.get(difficulty, DIFFICULTY_METRIC_OFFSETS["analyst"])
+    return {
+        key: clamp_metric(int(value) + offsets.get(key, 0))
+        for key, value in scenario.initial_metrics.items()
+    }
+
+
+def create_initial_state(scenario: Scenario, difficulty: str = "analyst") -> SessionState:
     return SessionState(
-        metrics={
-            key: clamp_metric(int(value))
-            for key, value in scenario.initial_metrics.items()
-        },
+        metrics=initial_metrics_for(scenario, difficulty),
         turn_count=0,
         detected_tactics=[],
         coach_message="Начните с уточнения интересов и ограничений собеседника.",
@@ -39,7 +52,10 @@ def apply_evaluation(
         for key, delta in deltas.items()
     }
     state.turn_count += 1
-    state.detected_tactics = evaluation.detected_tactics
+    state.detected_tactics = list(dict.fromkeys([
+        *state.detected_tactics,
+        *evaluation.detected_tactics,
+    ]))
     state.coach_message = evaluation.coach_message
     return deltas
 

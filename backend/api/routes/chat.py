@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
-from schemas import ChatRequest, ChatResponse, SessionStateResponse
+from api.visibility import public_state
+from schemas import ChatRequest, ChatResponse
 from services.negotiation import process_user_message
 
 
@@ -15,7 +16,7 @@ async def chat(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        opponent_text, state = await process_user_message(
+        opponent_text, state, session, scenario = await process_user_message(
             db,
             request.session_id,
             request.message,
@@ -33,10 +34,7 @@ async def chat(
 
     return ChatResponse(
         message=opponent_text,
-        state=SessionStateResponse(
-            metrics=state.metrics,
-            turn_count=state.turn_count,
-            detected_tactics=state.detected_tactics,
-            coach_message=state.coach_message,
-        ),
+        state=public_state(state, session.difficulty, session.status),
+        batna_revealed=session.batna_revealed,
+        batna_text=scenario.batna if session.batna_revealed else None,
     )
