@@ -6,6 +6,8 @@ from services.llm.base import (
     LLMProvider,
     NegotiationContext,
     RoundSummary,
+    ProfileRound,
+    ProfileAnalysis,
     TurnResult,
 )
 
@@ -13,13 +15,31 @@ from services.llm.base import (
 class MockLLMProvider(LLMProvider):
     """Deterministic provider used until a real inference endpoint is configured."""
 
+    async def analyze_profile(self, rounds: list[ProfileRound]) -> ProfileAnalysis:
+        labels = {
+            "questions": "вопросы", "empathy": "эмпатия", "argumentation": "аргументация",
+            "flexibility": "гибкость", "self_control": "самоконтроль",
+        }
+        averages = {
+            key: round(sum(item.skills.get(key, 0) for item in rounds) / len(rounds))
+            for key in labels
+        }
+        best = max(averages, key=averages.get)
+        weakest = min(averages, key=averages.get)
+        count_label = "одному завершённому раунду" if len(rounds) == 1 else f"{len(rounds)} завершённым раундам"
+        return ProfileAnalysis(
+            summary=f"По {count_label} сильнее всего проявляются {labels[best]}. Оценки ориентировочные: сравнивайте их вместе с конкретными репликами.",
+            strengths=[f"{labels[best].capitalize()}: в среднем {averages[best]}/100 по завершённым раундам."],
+            growth_areas=[f"{labels[weakest].capitalize()}: в среднем {averages[weakest]}/100; навык стоит тренировать чаще."],
+            next_steps=["В следующем раунде задайте открытый вопрос об интересах собеседника и зафиксируйте его ответ."],
+        )
+
     async def suggest_user_message(self, context: NegotiationContext, tactic: str) -> str:
-        topic = "цене" if any("цен" in item.content.lower() for item in context.transcript[-3:]) else "условиях поставки"
         suggestions = {
-            "open_question": f"Какие условия по {topic} для вас наиболее важны и почему?",
-            "interests": f"Что для вас стоит за позицией по {topic}: сроки, объём или предсказуемость?",
-            "facts": "Если мы зафиксируем объём и график заказов, сможем ли обсудить более выгодную цену?",
-            "compromise": "Давайте зафиксируем объём на квартал в обмен на поэтапное снижение цены.",
+            "open_question": "Какие условия для вас сейчас наиболее важны и почему?",
+            "interests": "Что для вас стоит за этой позицией: сроки, ресурсы или предсказуемость?",
+            "facts": "Давайте уточним факты и ограничения, прежде чем соглашаться на условия.",
+            "compromise": "Если мы согласуем приоритеты и сроки, сможете ли вы пересмотреть свою позицию?",
         }
         return suggestions[tactic]
 
@@ -48,6 +68,20 @@ class MockLLMProvider(LLMProvider):
         context: NegotiationContext,
     ) -> str:
         message = context.latest_user_message.lower()
+
+        if "руководитель команды" in context.character_role.lower():
+            if any(word in message for word in ("результат", "достиж", "вклад")):
+                return "Результаты важны для решения. Какие конкретные достижения вы предлагаете взять за основу пересмотра?"
+            if any(word in message for word in ("срок", "квартал", "бюджет")):
+                return "В этом квартале бюджет ограничен. Давайте определим критерии и дату повторного обсуждения."
+            return "Я готова обсудить ваш запрос. Что изменилось в вашей роли и какой пересмотр вы считаете обоснованным?"
+
+        if "со стороны клиента" in context.character_role.lower():
+            if any(word in message for word in ("объём", "объем", "функц", "приоритет")):
+                return "Давайте выделим функции, без которых первый запуск невозможен. Что вы предлагаете перенести на следующий этап?"
+            if any(word in message for word in ("бюджет", "ресурс", "команд")):
+                return "Дополнительные ресурсы нужно обосновать. Как они повлияют на срок запуска и качество?"
+            return "Срок запуска для нас критичен. Какие варианты по этапам вы видите без риска для ключевых функций?"
 
         if "объём" in message or "объем" in message:
             return (
@@ -97,7 +131,7 @@ class MockLLMProvider(LLMProvider):
             risk_delta=-trust_delta,
             detected_tactics=tactics,
             coach_message=(
-                "Попробуйте связать уступку с конкретным обменом: "
-                "объёмом, сроком или гарантией."
+                "Попробуйте связать уступку с конкретным встречным условием "
+                "и уточнить, что важно собеседнику."
             ),
         )

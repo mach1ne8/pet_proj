@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Achievements } from './Achievements'
 import Profile from './Profile'
+import ProfileAnalysis, { type ProfileReport } from './ProfileAnalysis'
+import { ScenarioPicker } from './ScenarioPicker'
 import './index.css'
 
 const SESSION_STORAGE_KEY = 'negotiation_session_id'
@@ -7,8 +10,9 @@ const DIFFICULTY_STORAGE_KEY = 'negotiation_difficulty'
 const NOTES_STORAGE_PREFIX = 'negotiation_notes_'
 const SESSION_STARTED_PREFIX = 'negotiation_started_at_'
 const SESSION_IDS_KEY = 'negotiation_session_ids'
+const PROFILE_REPORT_STORAGE_KEY = 'negotiation_profile_report_id'
 
-type View = 'setup' | 'active' | 'completed' | 'profile'
+type View = 'setup' | 'active' | 'completed' | 'profile' | 'profile-analysis'
 type Difficulty = 'beginner' | 'analyst' | 'advanced' | 'expert'
 
 type MetricProps = {
@@ -37,6 +41,7 @@ type SessionState = {
   turn_count: number
   detected_tactics: string[]
   coach_message: string
+  signal: string | null
 }
 
 type SessionResult = {
@@ -48,6 +53,7 @@ type SessionResult = {
   recommendations: string[]
   key_moments: string[]
   skills: Record<string, number>
+  achievements: string[]
   analysis_status: 'pending' | 'ready' | 'failed'
   completed_at: string
 }
@@ -91,30 +97,30 @@ const difficultyOptions: Array<{
   id: Difficulty
   label: string
   description: string
-  metricMode: 'emotional' | 'full' | 'qualitative' | 'hidden'
+  metricMode: 'guided' | 'progress' | 'qualitative' | 'hidden'
 }> = [
   {
     id: 'beginner',
     label: 'Новичок',
-    description: 'Эмоциональный барометр и поддержка AI-коуча.',
-    metricMode: 'emotional',
+    description: 'Состояние собеседника и ход переговоров.',
+    metricMode: 'guided',
   },
   {
     id: 'analyst',
     label: 'Аналитик',
-    description: 'Полные метрики состояния собеседника.',
-    metricMode: 'full',
+    description: 'Только показатели хода переговоров.',
+    metricMode: 'progress',
   },
   {
     id: 'advanced',
     label: 'Переговорщик',
-    description: 'Без чисел: только ход разговора и ваши заметки.',
+    description: 'Сигнал после хода, без чисел, SOS и готовых фраз.',
     metricMode: 'qualitative',
   },
   {
     id: 'expert',
     label: 'Мастер',
-    description: 'Без метрик и подсказок во время разговора.',
+    description: 'Только диалог и заметки: без сигналов и чек-листа.',
     metricMode: 'hidden',
   },
 ]
@@ -244,6 +250,28 @@ function Message({
   )
 }
 
+function NotesCard({
+  isOpen,
+  onToggle,
+  value,
+  onChange,
+}: {
+  isOpen: boolean
+  onToggle: () => void
+  value: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="notes-card">
+      <button className="notes-toggle" onClick={onToggle}>
+        <span><span className="notes-icon">✎</span> Мои заметки</span><span>{isOpen ? '−' : '+'}</span>
+      </button>
+      {isOpen && <textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder="Что сработало? Где стоило выдержать паузу?" maxLength={5000} />}
+      {!isOpen && <p>Фиксируйте наблюдения по ходу разговора.</p>}
+    </div>
+  )
+}
+
 function getCurrentTime() {
   return new Date().toLocaleTimeString('ru-RU', {
     hour: '2-digit',
@@ -300,6 +328,11 @@ function App() {
   const [hintMessages, setHintMessages] = useState<string[]>([])
   const [batnaText, setBatnaText] = useState<string | null>(null)
   const [profileSessions, setProfileSessions] = useState<SessionResponse[]>([])
+  const [profileReportId, setProfileReportId] = useState<string | null>(null)
+  const [lastProfileReportId, setLastProfileReportId] = useState<string | null>(() => localStorage.getItem(PROFILE_REPORT_STORAGE_KEY))
+  const [profileReport, setProfileReport] = useState<ProfileReport | null>(null)
+  const [profileReportError, setProfileReportError] = useState<string | null>(null)
+  const [isStartingProfileReport, setIsStartingProfileReport] = useState(false)
   const [isHintLoading, setIsHintLoading] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -334,13 +367,12 @@ function App() {
   const metrics = state?.metrics ?? {}
   const emotionalMetrics = [
     { title: 'Раздражение', key: 'irritation', variant: 'orange' as const },
-    { title: 'Интерес', key: 'interest', variant: 'blue' as const },
     { title: 'Напряжение', key: 'tension', variant: 'orange' as const },
     { title: 'Открытость', key: 'openness', variant: 'blue' as const },
   ]
-  const analystMetrics = [
+  const negotiationMetrics = [
     { title: 'Доверие', key: 'trust', variant: 'blue' as const },
-    ...emotionalMetrics,
+    { title: 'Интерес', key: 'interest', variant: 'blue' as const },
     { title: 'Риск срыва', key: 'risk', variant: 'orange' as const },
   ]
   const tacticSet = new Set(state?.detected_tactics ?? [])
@@ -349,8 +381,6 @@ function App() {
     { title: 'BATNA', done: Boolean(batnaText) || tacticSet.has('batna') },
     { title: 'Гарвардский метод', done: ['empathy', 'tradeoff', 'compromise', 'principled_negotiation'].some((item) => tacticSet.has(item)) },
   ]
-  const achievementCount = Number((state?.turn_count ?? 0) > 0) + Number(tacticSet.has('open_question')) + Number(Boolean(batnaText))
-  const latestOpponentText = [...messages].reverse().find((item) => !item.mine)?.text ?? ''
   const playerTurns = messages.filter((item) => item.mine)
 
   const saveNotes = (value: string) => {
@@ -416,7 +446,7 @@ function App() {
     if (!response.ok) throw new Error(`Ошибка загрузки сценариев: HTTP ${response.status}`)
     const data: Scenario[] = await response.json()
     setScenarios(data)
-    setScenario((current) => current ?? data[0] ?? null)
+    setScenario((current) => current ?? data.find((item) => item.slug === 'supplier-procurement') ?? data[0] ?? null)
     return data
   }
 
@@ -486,6 +516,48 @@ function App() {
     void loadProfile()
   }
 
+  const startProfileAnalysis = async () => {
+    if (isStartingProfileReport) return
+    const ids = profileSessions.filter((item) => item.status === 'completed' && item.result).slice(0, 20).map((item) => item.session_id)
+    if (!ids.length) return
+    setIsStartingProfileReport(true)
+    setProfileReportError(null)
+    try {
+      const response = await fetch('/api/profile-reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_ids: ids }),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const report: ProfileReport = await response.json()
+      setProfileReport(report)
+      setProfileReportId(report.report_id)
+      setLastProfileReportId(report.report_id)
+      localStorage.setItem(PROFILE_REPORT_STORAGE_KEY, report.report_id)
+      window.history.pushState({}, '', `/profile/analysis/${report.report_id}`)
+      setView('profile-analysis')
+    } catch {
+      setProfileReportError('Не удалось запустить анализ. Проверьте соединение и попробуйте ещё раз.')
+    } finally {
+      setIsStartingProfileReport(false)
+    }
+  }
+
+  const backToProfile = () => {
+    window.history.pushState({}, '', '/profile')
+    setView('profile')
+    void loadProfile()
+  }
+
+  const openLastProfileReport = () => {
+    if (!lastProfileReportId) return
+    setProfileReport(null)
+    setProfileReportError(null)
+    setProfileReportId(lastProfileReportId)
+    window.history.pushState({}, '', `/profile/analysis/${lastProfileReportId}`)
+    setView('profile-analysis')
+  }
+
   const closeProfile = () => {
     window.history.pushState({}, '', '/')
     setView(previousViewRef.current === 'profile'
@@ -514,7 +586,12 @@ function App() {
         const availableScenarios = await fetchScenarios()
         const storedSessionId = localStorage.getItem(SESSION_STORAGE_KEY)
         if (storedSessionId) await restoreSession(storedSessionId, availableScenarios)
-        if (window.location.pathname === '/profile') {
+        const reportPath = window.location.pathname.match(/^\/profile\/analysis\/([0-9a-f-]{36})$/i)
+        if (reportPath) {
+          setProfileReportId(reportPath[1])
+          await loadProfile()
+          setView('profile-analysis')
+        } else if (window.location.pathname === '/profile') {
           await loadProfile()
           setView('profile')
         }
@@ -532,7 +609,14 @@ function App() {
 
   useEffect(() => {
     const handlePopState = () => {
-      if (window.location.pathname === '/profile') {
+      const reportPath = window.location.pathname.match(/^\/profile\/analysis\/([0-9a-f-]{36})$/i)
+      if (reportPath) {
+        setProfileReportId(reportPath[1])
+        setProfileReport(null)
+        setProfileReportError(null)
+        void loadProfile()
+        setView('profile-analysis')
+      } else if (window.location.pathname === '/profile') {
         void loadProfile()
         setView('profile')
       } else {
@@ -542,6 +626,34 @@ function App() {
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
   }, [sessionStatus, result])
+
+  useEffect(() => {
+    if (view !== 'profile-analysis' || !profileReportId) return
+    let active = true
+    let inFlight = false
+    const refresh = async () => {
+      if (inFlight) return
+      inFlight = true
+      try {
+        const response = await fetch(`/api/profile-reports/${profileReportId}`)
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const report: ProfileReport = await response.json()
+        if (active) {
+          setProfileReport(report)
+          setProfileReportError(null)
+        }
+      } catch {
+        if (active) setProfileReportError('Не удалось загрузить отчёт. Проверьте соединение и обновите страницу.')
+      } finally {
+        inFlight = false
+      }
+    }
+    void refresh()
+    const interval = window.setInterval(() => {
+      if (profileReport?.status !== 'ready' && profileReport?.status !== 'failed') void refresh()
+    }, 3000)
+    return () => { active = false; window.clearInterval(interval) }
+  }, [view, profileReportId, profileReport?.status])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -766,11 +878,12 @@ function App() {
       )}
       <header className={`topbar topbar-${view}`}>
         <div className="brand">
-          <div className="brand-logo"><ArenaMark /></div>
-          <div>
+          <div className="brand-logo" role={view === 'active' ? 'img' : undefined} aria-label={view === 'active' ? 'Арена переговоров' : undefined}><ArenaMark /></div>
+          {view !== 'active' && <div>
             <div className="brand-title">Арена переговоров</div>
             <div className="brand-subtitle">Тренажёр переговорных навыков</div>
-          </div>
+          </div>}
+          {view === 'active' && <h1 className="brand-active-title">Арена · {selectedDifficulty.label}</h1>}
         </div>
         {view === 'active' && (
           <>
@@ -778,21 +891,18 @@ function App() {
               <span className="eyebrow">Сценарий</span>
               <strong>{scenario?.name ?? 'Переговоры'}</strong>
             </div>
-            <div className="achievements" title="Достижения за раунд" aria-label={`Достижений: ${achievementCount}`}>
-              <span aria-hidden="true">✦</span><strong>{achievementCount}</strong><small>ачивки</small>
-            </div>
             <div className="timer-block">
               <span className="timer-label">Осталось</span>
               <strong>{expiresAt ? formatDuration(remainingSeconds) : '—:—'}</strong>
             </div>
           </>
         )}
-        <button className="account-placeholder" onClick={view === 'profile' ? closeProfile : openProfile} aria-label={view === 'profile' ? 'Вернуться на арену' : 'Открыть личный кабинет'} title="Личный кабинет">
+        {view !== 'active' && <button className="account-placeholder" onClick={view === 'profile-analysis' ? backToProfile : view === 'profile' ? closeProfile : openProfile} aria-label={view === 'profile-analysis' ? 'Вернуться в личный кабинет' : view === 'profile' ? 'Вернуться на арену' : 'Открыть личный кабинет'} title="Личный кабинет">
           <svg aria-hidden="true" viewBox="0 0 24 24">
             <circle cx="12" cy="8" r="3.5" />
             <path d="M5.5 20a6.5 6.5 0 0 1 13 0" />
           </svg>
-        </button>
+        </button>}
       </header>
 
       {sessionError && <div className="global-error">{sessionError}</div>}
@@ -816,21 +926,24 @@ function App() {
             <div className="section-heading">
               <div>
                 <span className="eyebrow">СЦЕНАРИЙ</span>
-                <h2>{scenario?.name ?? 'Сценарий не найден'}</h2>
+                <h2>Выберите ситуацию</h2>
               </div>
               <span className="step-index">01</span>
             </div>
+            <ScenarioPicker
+              scenarios={scenarios}
+              selectedId={scenario?.id ?? null}
+              onSelect={(id) => setScenario(scenarios.find((item) => item.id === id) ?? null)}
+              disabled={scenarios.length === 0 || isStarting}
+            />
             <p className="card-description">{scenario?.description ?? 'Подготовка сценария переговоров.'}</p>
             <div className="scenario-meta">
-              <span><b>Роль</b> {scenario?.character_role ?? 'Загрузка…'}</span>
-              <span><b>Формат</b> Диалог с AI-оппонентом</span>
+              <div><span>Роль</span><strong>{scenario?.character_role ?? 'Загрузка…'}</strong></div>
+              <div><span>Формат</span><strong>Диалог с AI-оппонентом</strong></div>
             </div>
 
             <div className="section-heading difficulty-heading">
-              <div>
-                <span className="eyebrow">СЛОЖНОСТЬ</span>
-                <h2>Сколько поддержки вам нужно?</h2>
-              </div>
+              <h2>Сложность</h2>
               <span className="step-index">02</span>
             </div>
             <div className="difficulty-grid">
@@ -865,11 +978,11 @@ function App() {
           <aside className="active-left">
             <div className="side-card batna-card">
               <span className="eyebrow">СКРЫТАЯ ЦЕЛЬ · BATNA</span>
-              {batnaText ? <><h3>Альтернатива раскрыта</h3><p>{batnaText}</p></> : <><h3>Пока неизвестна</h3><p>Уточняйте, какие альтернативы есть у собеседника, если договориться не получится.</p></>}
+              {batnaText ? <><h3>Альтернатива раскрыта</h3><p>{batnaText}</p></> : <><h3>Пока неизвестна</h3>{['guided', 'progress'].includes(selectedDifficulty.metricMode) && <p>Уточняйте, какие альтернативы есть у собеседника, если договориться не получится.</p>}</>}
             </div>
-            {selectedDifficulty.metricMode === 'emotional' && <div className="side-card emotional-card">
+            {selectedDifficulty.metricMode === 'guided' && <div className="side-card emotional-card">
               <div className="side-card-heading"><span className="eyebrow">ЭМОЦИОНАЛЬНЫЙ БАРОМЕТР</span><span className="live-dot">LIVE</span></div>
-              <p className="metric-hint">Чувства собеседника во время разговора</p>
+              <p className="metric-hint">Состояние собеседника во время разговора</p>
               <div className="side-metrics">{emotionalMetrics.map((item) => <Metric key={item.key} title={item.title} value={metrics[item.key] ?? 0} variant={item.variant} compact />)}</div>
             </div>}
             <div className="side-card turn-history-card">
@@ -890,12 +1003,12 @@ function App() {
               </div>}
               {parentSessionId && <button className="branch-parent-link" onClick={() => void restoreSession(parentSessionId)}>← Исходная ветка</button>}
             </div>
+            {selectedDifficulty.metricMode === 'hidden' && <NotesCard isOpen={isNotesOpen} onToggle={() => setIsNotesOpen((open) => !open)} value={notes} onChange={saveNotes} />}
           </aside>
           <section className="chat-panel">
             <div className="chat-header">
               <div>
                 <button className="back-to-setup" onClick={() => setView('setup')}>← К настройке</button>
-                <span className="eyebrow">АРЕНА · {selectedDifficulty.label.toUpperCase()}</span>
                 <h2>{scenario?.character_name ?? 'Собеседник'}</h2>
                 <p>{scenario?.character_role ?? 'Представитель поставщика'} · {state?.turn_count ?? 0} ходов{forkFromTurn ? ` · Ветка с хода ${forkFromTurn}` : ''}</p>
               </div>
@@ -913,12 +1026,12 @@ function App() {
               <div ref={messagesEndRef} />
             </div>
 
-            <div className="quick-actions">
+            {['guided', 'progress'].includes(selectedDifficulty.metricMode) && <div className="quick-actions">
               <button disabled={isGenerating || isOpponentThinking} onClick={() => void chooseQuickAction('open_question')}>+ Открытый вопрос</button>
               <button disabled={isGenerating || isOpponentThinking} onClick={() => void chooseQuickAction('interests')}>◎ Уточнить интересы</button>
               <button disabled={isGenerating || isOpponentThinking} onClick={() => void chooseQuickAction('facts')}>▣ Аргумент на фактах</button>
               <button disabled={isGenerating || isOpponentThinking} onClick={() => void chooseQuickAction('compromise')}>◇ Компромисс</button>
-            </div>
+            </div>}
             {isGenerating && <p className="generation-status">Готовим реплику для вас…</p>}
 
             <div className="message-input">
@@ -939,31 +1052,30 @@ function App() {
             </div>
           </section>
 
-          <aside className="active-side">
-            {selectedDifficulty.metricMode === 'full' && (
+          {selectedDifficulty.metricMode !== 'hidden' && <aside className="active-side">
+            {['guided', 'progress'].includes(selectedDifficulty.metricMode) && (
               <div className="side-card">
-                <div className="side-card-heading"><span className="eyebrow">СОСТОЯНИЕ СОБЕСЕДНИКА</span><span className="live-dot">LIVE</span></div>
+                <div className="side-card-heading"><span className="eyebrow">ХОД ПЕРЕГОВОРОВ</span><span className="live-dot">LIVE</span></div>
                 <div className="side-metrics">
-                  {analystMetrics.map((metric) => <Metric key={metric.key} title={metric.title} value={metrics[metric.key] ?? 0} variant={metric.variant} compact />)}
+                  {negotiationMetrics.map((metric) => <Metric key={metric.key} title={metric.title} value={metrics[metric.key] ?? 0} variant={metric.variant} compact />)}
                 </div>
-                <p className="metric-hint">Показатели меняются после каждой вашей реплики.</p>
+                <p className="metric-hint">Доверие, интерес и риск меняются после каждой вашей реплики.</p>
               </div>
             )}
-            {selectedDifficulty.metricMode === 'qualitative' && <div className="coach-card quiet-card"><span className="eyebrow">РЕЖИМ ПЕРЕГОВОРЩИКА</span><h3>Читайте между строк</h3><p>Последний сигнал собеседника:</p><blockquote>{latestOpponentText.slice(0, 170)}{latestOpponentText.length > 170 ? '…' : ''}</blockquote><p>Сделайте вывод сами. Числа появятся после раунда.</p></div>}
+            {selectedDifficulty.metricMode === 'qualitative' && <div className="side-card turn-signal-card" aria-live="polite">
+              <span className="eyebrow">СИГНАЛ ПОСЛЕ ХОДА</span>
+              <h3>{state?.turn_count ? 'Что изменилось' : 'Ориентируйтесь на диалог'}</h3>
+              <p>{state?.signal ?? (state?.turn_count ? 'Для этого хода нет сохранённого сигнала.' : 'После вашей первой реплики здесь появится краткий сигнал без чисел и готового совета.')}</p>
+              <span className="signal-meta">{state?.turn_count ? `Ход ${state.turn_count} · без точных метрик` : 'Ожидаем первый ход'}</span>
+            </div>}
 
-            {['emotional', 'full'].includes(selectedDifficulty.metricMode) && <div className="side-card sos-card"><span className="eyebrow">AI COACH</span><button onClick={() => void requestHint()} disabled={isHintLoading || hintsUsed >= 3}>{isHintLoading ? 'Готовим подсказку…' : `SOS · Подсказка ${hintsUsed}/3`}</button><p>Каждая подсказка уменьшает итоговую оценку на 8 баллов.</p><div aria-live="polite">{hintMessages.map((item, index) => ({ item, number: index + 1 })).reverse().map(({ item, number }) => <div className="sos-answer" key={`${number}-${item}`}><strong>Подсказка {number}</strong><span>{item}</span></div>)}</div></div>}
+            {['guided', 'progress'].includes(selectedDifficulty.metricMode) && <div className="side-card sos-card"><span className="eyebrow">AI COACH</span><button onClick={() => void requestHint()} disabled={isHintLoading || hintsUsed >= 3}>{isHintLoading ? 'Готовим подсказку…' : `SOS · Подсказка ${hintsUsed}/3`}</button><p>Каждая подсказка уменьшает итоговую оценку на 8 баллов.</p><div aria-live="polite">{hintMessages.map((item, index) => ({ item, number: index + 1 })).reverse().map(({ item, number }) => <div className="sos-answer" key={`${number}-${item}`}><strong>Подсказка {number}</strong><span>{item}</span></div>)}</div></div>}
 
             <div className="side-card checklist-card"><span className="eyebrow">ЧЕК-ЛИСТ ТЕХНИК</span>{checklist.map((item) => <div className="checklist-item" key={item.title}><span className={item.done ? 'done' : ''}>{item.done ? '✓' : '○'}</span>{item.title}</div>)}</div>
 
-            <div className="notes-card">
-              <button className="notes-toggle" onClick={() => setIsNotesOpen((open) => !open)}>
-                <span><span className="notes-icon">✎</span> Мои заметки</span><span>{isNotesOpen ? '−' : '+'}</span>
-              </button>
-              {isNotesOpen && <textarea value={notes} onChange={(event) => saveNotes(event.target.value)} placeholder="Что сработало? Где стоило выдержать паузу?" maxLength={5000} />}
-              {!isNotesOpen && <p>Фиксируйте наблюдения по ходу разговора.</p>}
-            </div>
+            <NotesCard isOpen={isNotesOpen} onToggle={() => setIsNotesOpen((open) => !open)} value={notes} onChange={saveNotes} />
 
-          </aside>
+          </aside>}
         </main>
       )}
 
@@ -974,48 +1086,63 @@ function App() {
           <section className="summary-hero">
             <div>
               <span className="eyebrow accent">СЕССИЯ ЗАВЕРШЕНА</span>
-              <h1>{result.outcome === 'unplayed' ? 'Диалог не состоялся.' : result.outcome === 'strong' ? 'Сильный раунд.' : result.outcome === 'acceptable' ? 'Хорошая основа для роста.' : 'Раунд завершён.'}</h1>
+              <h1>{result.outcome === 'unplayed' ? 'Диалог не состоялся' : result.outcome === 'strong' ? 'Сильный раунд' : result.outcome === 'acceptable' ? 'Хорошая основа для роста' : 'Раунд завершён'}</h1>
               <p>Разбор показывает не только итог, но и то, как ваши решения повлияли на ход переговоров.</p>
             </div>
-            <div className="score-card"><span>ИТОГОВАЯ ОЦЕНКА</span><strong>{result.final_score}</strong><small>/ 100</small></div>
+            <div className="score-card">
+              <span className="score-card-label">Итоговая оценка</span>
+              <div className="score-card-value"><strong>{result.final_score}</strong><small>/ 100</small></div>
+            </div>
           </section>
 
           <div className="summary-grid">
             <section className="summary-card metrics-card">
               <div className="card-heading"><span className="eyebrow">ПАНЕЛЬ РАУНДА</span><span>{state?.turn_count ?? 0} ходов</span></div>
               <div className="summary-metrics">
+                <h3 className="summary-metric-heading">Ход переговоров</h3>
                 <Metric title="Доверие" value={result.final_metrics.trust ?? 0} variant="blue" />
                 <Metric title="Интерес" value={result.final_metrics.interest ?? 0} variant="green" />
-                <Metric title="Открытость" value={result.final_metrics.openness ?? 0} variant="green" />
                 <Metric title="Риск срыва" value={result.final_metrics.risk ?? 0} variant="orange" />
+                <h3 className="summary-metric-heading">Состояние собеседника</h3>
                 <Metric title="Раздражение" value={result.final_metrics.irritation ?? 0} variant="orange" />
                 <Metric title="Напряжение" value={result.final_metrics.tension ?? 0} variant="blue" />
+                <Metric title="Открытость" value={result.final_metrics.openness ?? 0} variant="green" />
               </div>
             </section>
 
             <section className="summary-card insight-card">
               <div className="card-heading"><span className="eyebrow">AI COACH</span><span>ОБРАТНАЯ СВЯЗЬ</span></div>
               <div className="insight-columns">
-                <div><h3>Сработало</h3>{result.strengths.map((item) => <p className="insight-positive" key={item}>✓ {item}</p>)}</div>
+                <div><h3>Сработало</h3>{result.strengths.length ? result.strengths.map((item) => <p className="insight-positive" key={item}>✓ {item}</p>) : <p className="insight-empty">{result.outcome === 'unplayed' ? 'Диалог не начался. Здесь появятся удачные приёмы после ваших реплик.' : 'Пока нет отмеченных сильных сторон.'}</p>}</div>
                 <div><h3>Можно улучшить</h3>{result.mistakes.map((item) => <p className="insight-negative" key={item}>! {item}</p>)}</div>
               </div>
               <div className="recommendation"><span>Рекомендация</span><p>{result.recommendations[0]}</p></div>
             </section>
           </div>
 
+          <section className="summary-card summary-achievements">
+            <div className="card-heading"><h2 className="summary-section-title">Достижения за раунд</h2><span>{result.achievements?.length ?? 0} получено</span></div>
+            {result.achievements?.length ? (
+              <Achievements unlocked={result.achievements} onlyUnlocked />
+            ) : (
+              <p className="achievement-empty">За этот раунд достижений нет. Все доступные достижения можно посмотреть в личном кабинете.</p>
+            )}
+          </section>
+
           <section className="summary-card bottom-summary">
-            <div className="card-heading"><span className="eyebrow">ДЕТАЛИ СЕССИИ</span><span>{state?.detected_tactics?.length ?? 0} техник</span></div>
+            <div className="card-heading"><h2 className="summary-section-title">Детали сессии</h2><span>{state?.detected_tactics?.length ?? 0} техник</span></div>
             <p className="round-duration">Время раунда: {formatDuration(Math.min(elapsedSeconds, 600))} · Подсказок SOS: {hintsUsed}</p>
             <div className="techniques">{(state?.detected_tactics ?? []).map((tactic) => <span key={tactic}>{tacticLabels[tactic] ?? tactic}</span>)}{!state?.detected_tactics?.length && <span>Техники не зафиксированы</span>}</div>
             {result.key_moments?.length > 0 && <div className="key-moments"><span className="eyebrow">КЛЮЧЕВЫЕ МОМЕНТЫ</span>{result.key_moments.map((item) => <p key={item}>{item}</p>)}</div>}
-            {sessionId && <div className="saved-notes"><label className="eyebrow" htmlFor="summary-notes">ВАШИ ЗАМЕТКИ</label><textarea id="summary-notes" value={notes} onChange={(event) => saveNotes(event.target.value)} maxLength={5000} placeholder="Запишите, что получилось и что стоит попробовать иначе." /></div>}
-            <button className="transcript-toggle" onClick={() => setIsTranscriptOpen((open) => !open)}>{isTranscriptOpen ? 'Скрыть transcript' : 'Открыть transcript'} <span>{isTranscriptOpen ? '↑' : '↓'}</span></button>
+            {sessionId && <div className="saved-notes"><label className="summary-section-title" htmlFor="summary-notes">Ваши заметки</label><textarea id="summary-notes" value={notes} onChange={(event) => saveNotes(event.target.value)} maxLength={5000} placeholder="Запишите, что получилось и что стоит попробовать иначе." /></div>}
+            <button className="transcript-toggle" onClick={() => setIsTranscriptOpen((open) => !open)}>{isTranscriptOpen ? 'Скрыть историю диалога' : 'Открыть историю диалога'} <span>{isTranscriptOpen ? '↑' : '↓'}</span></button>
             {isTranscriptOpen && <div className="transcript">{messages.map((msg) => <Message key={msg.id} {...msg} />)}</div>}
           </section>
           <button className="primary-button new-session-button" onClick={startNewSession}>Начать новую сессию <ArrowIcon /></button>
         </main>
       )}
-      {view === 'profile' && <Profile sessions={profileSessions.map((item) => ({ ...item, notes: localStorage.getItem(`${NOTES_STORAGE_PREFIX}${item.session_id}`) ?? item.notes ?? '' }))} scenarioNames={Object.fromEntries(scenarios.map((item) => [item.id, item.name]))} onOpen={(id) => void openProfileSession(id)} onSaveNotes={(id, value) => void saveProfileNotes(id, value)} onBack={closeProfile} />}
+      {view === 'profile' && <Profile sessions={profileSessions.map((item) => ({ ...item, notes: localStorage.getItem(`${NOTES_STORAGE_PREFIX}${item.session_id}`) ?? item.notes ?? '' }))} scenarioNames={Object.fromEntries(scenarios.map((item) => [item.id, item.name]))} onOpen={(id) => void openProfileSession(id)} onSaveNotes={(id, value) => void saveProfileNotes(id, value)} onBack={closeProfile} onAnalyze={() => void startProfileAnalysis()} onOpenReport={openLastProfileReport} hasPreviousReport={!!lastProfileReportId} isAnalyzing={isStartingProfileReport} error={profileReportError} />}
+      {view === 'profile-analysis' && <ProfileAnalysis report={profileReport} error={profileReportError} onBack={backToProfile} onRetry={() => void startProfileAnalysis()} isRetrying={isStartingProfileReport} />}
     </div>
   )
 }

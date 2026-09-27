@@ -7,6 +7,7 @@ from core.database import get_db
 from api.visibility import public_state
 from repositories.scenarios import get_scenario
 from repositories.sessions import get_messages, get_session
+from repositories.state import get_latest_metric_event
 from schemas import (
     CreateSessionRequest,
     ForkSessionRequest,
@@ -36,6 +37,7 @@ async def serialize_session(db: AsyncSession, session, messages) -> SessionRespo
     scenario = await get_scenario(db, session.scenario_id) if session.batna_revealed else None
     state = session.state
     result = session.result
+    latest_event = await get_latest_metric_event(db, session.id) if state and session.status == "active" and session.difficulty == "advanced" and state.turn_count else None
     return SessionResponse(
         session_id=session.id,
         status=session.status,
@@ -49,7 +51,7 @@ async def serialize_session(db: AsyncSession, session, messages) -> SessionRespo
         notes=session.notes,
         parent_session_id=session.parent_session_id,
         fork_from_turn=session.fork_from_turn,
-        state=public_state(state, session.difficulty, session.status) if state else None,
+        state=public_state(state, session.difficulty, session.status, latest_event.deltas if latest_event else None) if state else None,
         result=SessionResultResponse(
             final_score=result.final_score,
             outcome=result.outcome,
@@ -59,6 +61,7 @@ async def serialize_session(db: AsyncSession, session, messages) -> SessionRespo
             recommendations=result.recommendations,
             key_moments=result.key_moments,
             skills=result.skills,
+            achievements=result.achievements,
             analysis_status=result.analysis_status,
             completed_at=result.completed_at,
         ) if result else None,

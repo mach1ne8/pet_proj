@@ -257,7 +257,38 @@ async def process_user_message(
     return opponent_message.content, state, negotiation_session, scenario
 
 
-def build_session_result(state, initial_metrics: dict[str, int], history: list[Message], hints_used: int) -> SessionResult:
+def earned_achievements(
+    user_messages: list[str],
+    initial_metrics: dict[str, int],
+    final_metrics: dict[str, int],
+    hints_used: int,
+    batna_revealed: bool,
+) -> list[str]:
+    if not user_messages:
+        return []
+
+    earned = ["first_round"]
+    if sum("?" in message for message in user_messages) >= 3:
+        earned.append("curious_mind")
+    if batna_revealed:
+        earned.append("batna_scout")
+    if len(user_messages) >= 3 and hints_used == 0:
+        earned.append("independent")
+    if (
+        final_metrics.get("trust", 0) - initial_metrics.get("trust", 0) >= 10
+        and initial_metrics.get("risk", 0) - final_metrics.get("risk", 0) >= 5
+    ):
+        earned.append("trust_builder")
+    return earned
+
+
+def build_session_result(
+    state,
+    initial_metrics: dict[str, int],
+    history: list[Message],
+    hints_used: int,
+    batna_revealed: bool = False,
+) -> SessionResult:
     metrics = {key: int(value) for key, value in state.metrics.items()}
     user_messages = [item.content for item in history if item.role == "user"]
     turns = len(user_messages)
@@ -301,6 +332,7 @@ def build_session_result(state, initial_metrics: dict[str, int], history: list[M
         mistakes=mistakes,
         key_moments=key_moments,
         skills=skills,
+        achievements=earned_achievements(user_messages, initial_metrics, metrics, hints_used, batna_revealed),
         recommendations=recommendations,
         completed_at=datetime.now(timezone.utc),
     )
@@ -332,7 +364,10 @@ async def complete_negotiation_session(
         .limit(1)
     )).scalar_one_or_none()
     baseline = initial_event.metrics if initial_event else initial_metrics_for(scenario, negotiation_session.difficulty)
-    result = build_session_result(negotiation_session.state, baseline, history, negotiation_session.hints_used)
+    result = build_session_result(
+        negotiation_session.state, baseline, history,
+        negotiation_session.hints_used, negotiation_session.batna_revealed,
+    )
     result.analysis_status = "pending" if negotiation_session.state.turn_count else "ready"
     negotiation_session.status = "completed"
     negotiation_session.updated_at = datetime.now(timezone.utc)
@@ -398,11 +433,11 @@ async def expire_if_needed(db: AsyncSession, session: NegotiationSession) -> boo
 
 def select_coach_hint(coach_message: str, opponent_text: str, hint_number: int, batna_revealed: bool) -> str:
     if hint_number == 0:
-        return coach_message.strip() or "Начните с вопроса о том, какие условия для собеседника важнее цены."
+        return coach_message.strip() or "Начните с вопроса о том, какие условия для собеседника важнее всего."
     if hint_number == 1:
-        if "срок" in opponent_text.casefold() or "постав" in opponent_text.casefold():
-            return "Уточните, какой график поставок собеседник сможет гарантировать и что для этого нужно с вашей стороны."
-        return "Спросите, какие объём или срок контракта позволят обсудить встречную уступку по цене."
+        if "срок" in opponent_text.casefold():
+            return "Уточните, почему этот срок важен и какие условия позволят его пересмотреть."
+        return "Спросите, какое условие для собеседника наиболее важно и что он готов предложить взамен."
     if not batna_revealed:
         return "Проверьте альтернативу: что собеседник сделает, если соглашения не будет? Затем предложите обмен, а не одностороннюю уступку."
     return "Сформулируйте конкретный обмен: что вы готовы дать и какое обязательство хотите получить взамен."
@@ -435,6 +470,8 @@ async def suggest_user_message(db: AsyncSession, session_id: uuid.UUID, tactic: 
         raise LookupError("Session not found")
     if session.status != "active" or await expire_if_needed(db, session):
         raise ValueError("Session is not active")
+    if session.difficulty not in {"beginner", "analyst"}:
+        raise ValueError("Quick actions are not available at this difficulty")
     scenario = await get_scenario(db, session.scenario_id)
     if scenario is None:
         raise LookupError("Scenario not found")

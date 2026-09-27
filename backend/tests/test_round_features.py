@@ -1,9 +1,17 @@
 import unittest
+import uuid
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
-from api.visibility import public_state
-from services.negotiation import build_session_result, messages_before_turn, normalize_tactics, select_coach_hint, should_reveal_batna
+from pydantic import ValidationError
+
+from api.visibility import public_state, qualitative_signal
+from services.llm.base import ConversationMessage, NegotiationContext, ProfileRound
+from services.llm.mock import MockLLMProvider
+from services.llm.openai_compatible import OpenAICompatibleProvider
+from services.negotiation import build_session_result, earned_achievements, messages_before_turn, normalize_tactics, select_coach_hint, should_reveal_batna, suggest_user_message
 from services.state import initial_metrics_for
+from schemas import CreateProfileReportRequest
 
 
 INITIAL = {
@@ -13,6 +21,12 @@ INITIAL = {
 
 
 class RoundFeaturesTest(unittest.TestCase):
+    def test_profile_report_requires_bounded_session_list(self):
+        with self.assertRaises(ValidationError):
+            CreateProfileReportRequest(session_ids=[])
+        with self.assertRaises(ValidationError):
+            CreateProfileReportRequest(session_ids=[uuid.uuid4() for _ in range(21)])
+
     def state(self):
         return SimpleNamespace(metrics=dict(INITIAL), turn_count=0, detected_tactics=[], coach_message="")
 
@@ -20,7 +34,24 @@ class RoundFeaturesTest(unittest.TestCase):
         result = build_session_result(self.state(), INITIAL, [], 0)
         self.assertEqual(result.final_score, 0)
         self.assertEqual(result.outcome, "unplayed")
+        self.assertEqual(result.achievements, [])
         self.assertTrue(all(value == 0 for value in result.skills.values()))
+
+    def test_achievements_need_completed_meaningful_dialogue(self):
+        self.assertEqual(earned_achievements([], INITIAL, INITIAL, 0, False), [])
+        self.assertEqual(
+            earned_achievements(["Здравствуйте"], INITIAL, INITIAL, 0, False),
+            ["first_round"],
+        )
+
+    def test_all_five_achievements_have_distinct_conditions(self):
+        final = {**INITIAL, "trust": INITIAL["trust"] + 10, "risk": INITIAL["risk"] - 5}
+        messages = ["Какие условия важны?", "Что будет без соглашения?", "Какой объём нужен?"]
+        self.assertEqual(
+            earned_achievements(messages, INITIAL, final, 0, True),
+            ["first_round", "curious_mind", "batna_scout", "independent", "trust_builder"],
+        )
+        self.assertNotIn("independent", earned_achievements(messages, INITIAL, final, 1, True))
 
     def test_hint_reduces_score(self):
         state = self.state()
@@ -43,10 +74,29 @@ class RoundFeaturesTest(unittest.TestCase):
 
     def test_metrics_are_filtered_by_difficulty(self):
         state = self.state()
-        self.assertEqual(set(public_state(state, "beginner", "active").metrics), {"irritation", "interest", "tension", "openness"})
-        self.assertEqual(len(public_state(state, "analyst", "active").metrics), 6)
+        self.assertEqual(set(public_state(state, "beginner", "active").metrics), set(INITIAL))
+        self.assertEqual(set(public_state(state, "analyst", "active").metrics), {"trust", "interest", "risk"})
+        self.assertEqual(public_state(state, "advanced", "active").metrics, {})
         self.assertEqual(public_state(state, "expert", "active").metrics, {})
         self.assertEqual(len(public_state(state, "expert", "completed").metrics), 6)
+
+    def test_qualitative_signal_is_only_visible_to_advanced_after_a_turn(self):
+        state = self.state()
+        state.detected_tactics = ["open_question"]
+        self.assertIsNone(public_state(state, "advanced", "active", {"interest": 4}).signal)
+        state.turn_count = 1
+        advanced = public_state(state, "advanced", "active", {"interest": 4})
+        self.assertEqual(advanced.signal, "Собеседник проявляет больше интереса.")
+        self.assertEqual(advanced.metrics, {})
+        self.assertIsNone(public_state(state, "analyst", "active", {"interest": 4}).signal)
+        self.assertIsNone(public_state(state, "expert", "active", {"interest": 4}).signal)
+        self.assertEqual(public_state(state, "expert", "active").detected_tactics, [])
+        self.assertEqual(public_state(state, "expert", "completed").detected_tactics, ["open_question"])
+
+    def test_qualitative_signal_describes_a_change_not_the_opponent_text(self):
+        self.assertEqual(qualitative_signal({"risk": 4}), "Разговор стал более хрупким.")
+        self.assertEqual(qualitative_signal({"trust": 3}), "Контакт с собеседником укрепился.")
+        self.assertEqual(qualitative_signal({"interest": 0}), "Пока заметного сдвига в разговоре нет.")
 
     def test_initial_metrics_follow_difficulty(self):
         scenario = SimpleNamespace(initial_metrics=INITIAL)
@@ -82,6 +132,54 @@ class RoundFeaturesTest(unittest.TestCase):
         result = build_session_result(state, INITIAL, [SimpleNamespace(role="user", content=long_message)], 0)
         self.assertTrue(result.key_moments[0].endswith("…"))
         self.assertFalse(result.key_moments[0].endswith("Провери"))
+
+
+class ScenarioProviderTest(unittest.IsolatedAsyncioTestCase):
+    async def test_profile_mock_uses_aggregate_skills(self):
+        rounds = [
+            ProfileRound(score=70, skills={"questions": 80, "empathy": 45, "argumentation": 50, "flexibility": 60, "self_control": 55}, strengths=["Вопросы"], mistakes=["Не уточнили интерес"], recommendations=[]),
+            ProfileRound(score=60, skills={"questions": 70, "empathy": 55, "argumentation": 60, "flexibility": 50, "self_control": 45}, strengths=["Вопросы"], mistakes=["Не уточнили интерес"], recommendations=[]),
+        ]
+        analysis = await MockLLMProvider().analyze_profile(rounds)
+        self.assertIn("2 завершённым", analysis.summary)
+        self.assertIn("Вопросы", analysis.strengths[0])
+        self.assertIn("Эмпатия", analysis.growth_areas[0])
+
+    def context(self, role: str) -> NegotiationContext:
+        return NegotiationContext(
+            system_prompt="Ролевая ситуация",
+            character_name="Собеседник",
+            character_role=role,
+            hidden_goal="Скрытая цель",
+            constraints="Ограничение",
+            batna="Альтернатива",
+            user_goals=["Договориться об условиях"],
+            transcript=[ConversationMessage(role="assistant", content="Обсудим условия.")],
+            latest_user_message="Какие результаты важны?",
+        )
+
+    async def test_suggestion_uses_selected_scenario(self):
+        provider = OpenAICompatibleProvider()
+        provider._complete = AsyncMock(return_value="Какие результаты помогут принять решение?")
+        await provider.suggest_user_message(self.context("Руководитель команды"), "open_question")
+        prompt = provider._complete.await_args.args[0][0]["content"]
+        self.assertIn("Руководитель команды", prompt)
+        self.assertIn("Договориться об условиях", prompt)
+        self.assertNotIn("закупщику", prompt)
+
+    async def test_mock_replies_match_character_role(self):
+        provider = MockLLMProvider()
+        salary = await provider.generate_opponent_reply(self.context("Руководитель команды"))
+        deadline = await provider.generate_opponent_reply(self.context("Руководитель проекта со стороны клиента"))
+        self.assertIn("достижения", salary)
+        self.assertIn("запуска", deadline)
+
+    async def test_quick_actions_are_not_available_on_higher_difficulties(self):
+        for difficulty in ("advanced", "expert"):
+            session = SimpleNamespace(status="active", expires_at=None, difficulty=difficulty)
+            with patch("services.negotiation.get_session", new=AsyncMock(return_value=session)):
+                with self.assertRaisesRegex(ValueError, "Quick actions"):
+                    await suggest_user_message(AsyncMock(), uuid.uuid4(), "open_question")
 
 
 if __name__ == "__main__":

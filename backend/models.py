@@ -202,6 +202,7 @@ class SessionResult(Base):
     recommendations: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     key_moments: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     skills: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False, default=dict)
+    achievements: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     analysis_status: Mapped[str] = mapped_column(String(16), nullable=False, default="ready")
     completed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -212,6 +213,17 @@ class SessionResult(Base):
     session: Mapped["NegotiationSession"] = relationship(
         back_populates="result",
     )
+
+
+class ProfileReport(Base):
+    __tablename__ = "profile_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    session_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    analysis: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
 
 
 class Scenario(Base):

@@ -47,6 +47,21 @@ class RoundSummary(BaseModel):
     recommendations: list[str] = Field(max_length=4)
 
 
+class ProfileRound(BaseModel):
+    score: int
+    skills: dict[str, int]
+    strengths: list[str]
+    mistakes: list[str]
+    recommendations: list[str]
+
+
+class ProfileAnalysis(BaseModel):
+    summary: str = Field(min_length=1, max_length=600)
+    strengths: list[str] = Field(min_length=1, max_length=3)
+    growth_areas: list[str] = Field(min_length=1, max_length=3)
+    next_steps: list[str] = Field(min_length=1, max_length=3)
+
+
 def build_private_system_prompt(context: NegotiationContext) -> str:
     """Build the private prompt sent only from backend to the LLM provider."""
     goals = ", ".join(context.user_goals)
@@ -78,6 +93,10 @@ def build_private_system_prompt(context: NegotiationContext) -> str:
 
 
 class LLMProvider(ABC):
+    @abstractmethod
+    async def analyze_profile(self, rounds: list[ProfileRound]) -> ProfileAnalysis:
+        raise NotImplementedError
+
     @abstractmethod
     async def suggest_user_message(self, context: NegotiationContext, tactic: str) -> str:
         raise NotImplementedError

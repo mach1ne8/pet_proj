@@ -17,6 +17,7 @@ class SessionStateResponse(BaseModel):
     turn_count: int
     detected_tactics: list[str]
     coach_message: str
+    signal: str | None = None
 
 
 class SessionResultResponse(BaseModel):
@@ -28,6 +29,7 @@ class SessionResultResponse(BaseModel):
     recommendations: list[str]
     key_moments: list[str] = Field(default_factory=list)
     skills: dict[str, int] = Field(default_factory=dict)
+    achievements: list[str] = Field(default_factory=list)
     analysis_status: Literal["pending", "ready", "failed"] = "ready"
     completed_at: datetime
 
@@ -102,3 +104,21 @@ class ChatResponse(BaseModel):
     state: SessionStateResponse
     batna_revealed: bool = False
     batna_text: str | None = None
+
+
+class CreateProfileReportRequest(BaseModel):
+    session_ids: list[uuid.UUID] = Field(min_length=1, max_length=20)
+
+
+class ProfileAnalysisResponse(BaseModel):
+    summary: str
+    strengths: list[str]
+    growth_areas: list[str]
+    next_steps: list[str]
+    rounds_analyzed: int
+
+
+class ProfileReportResponse(BaseModel):
+    report_id: uuid.UUID
+    status: Literal["pending", "ready", "failed"]
+    analysis: ProfileAnalysisResponse | None = None
