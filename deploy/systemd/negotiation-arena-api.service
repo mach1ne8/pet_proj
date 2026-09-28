@@ -1,0 +1,18 @@
+[Unit]
+Description=Negotiation Arena FastAPI
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/negotiation-arena/backend
+ExecStart=/home/ec2-user/negotiation-arena/backend/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
