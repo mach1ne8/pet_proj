@@ -119,8 +119,19 @@ export default function Profile({ sessions, scenarioNames, onOpen, onSaveNotes, 
         <Achievements unlocked={unlockedAchievements} alignWithProfile />
       </section>}
       <div className="profile-grid">
-        <section className="profile-panel"><span className="eyebrow">ПРОФИЛЬ НАВЫКОВ</span><h2>Ваш стиль переговоров</h2><SkillsRadar sessions={completed} /><p className="profile-muted">Диаграмма строится по завершённым раундам. Оценки приблизительные и помогают видеть динамику.</p><button className="profile-analyze-button" onClick={onAnalyze} disabled={!completed.length || isAnalyzing}>{isAnalyzing ? 'Запускаем анализ…' : 'Разобрать мои навыки'} <span aria-hidden="true">↗</span></button>{hasPreviousReport && <button className="profile-previous-report" onClick={onOpenReport}>Открыть последний отчёт →</button>}{error && <p className="profile-analysis-error" role="alert">{error}</p>}<p className="profile-muted">{completed.length ? 'Разберём до 20 последних завершённых раундов. На этой ВМ генерация может занять около минуты.' : 'Завершите хотя бы один раунд, чтобы получить разбор.'}</p></section>
-        <section className="profile-panel"><span className="eyebrow">ИСТОРИЯ</span><h2>Ваши попытки</h2>
+        <section className="profile-panel profile-skills-panel">
+          <span className="eyebrow">ПРОФИЛЬ НАВЫКОВ</span>
+          <h2>Ваш стиль переговоров</h2>
+          <SkillsRadar sessions={completed} />
+          <p className="profile-muted">Диаграмма строится по завершённым раундам. Оценки приблизительные и помогают видеть динамику.</p>
+          <div className="profile-skill-actions">
+            <button className="profile-analyze-button" onClick={onAnalyze} disabled={!completed.length || isAnalyzing}>{isAnalyzing ? 'Запускаем анализ…' : 'Разобрать мои навыки'} <span aria-hidden="true">↗</span></button>
+            {hasPreviousReport && <button className="profile-previous-report" onClick={onOpenReport}>Открыть последний отчёт →</button>}
+            {error && <p className="profile-analysis-error" role="alert">{error}</p>}
+            <p className="profile-muted">{completed.length ? 'Разберём до 20 последних завершённых раундов. На этой ВМ генерация может занять около минуты.' : 'Завершите хотя бы один раунд, чтобы получить разбор.'}</p>
+          </div>
+        </section>
+        <section className="profile-panel profile-history-panel"><span className="eyebrow">ИСТОРИЯ</span><h2>Ваши попытки</h2>
           {sessions.length === 0 && <p className="profile-muted">Пока нет попыток. Начните переговоры, чтобы увидеть здесь результат.</p>}
           <div className="profile-history">{sessions.map((session) => <article className="profile-attempt" key={session.session_id}>
             <div className="profile-attempt-top"><div><strong>{scenarioNames[session.scenario_id ?? ''] ?? 'Переговоры'}</strong><span>{session.result ? new Date(session.result.completed_at).toLocaleDateString('ru-RU') : 'Раунд не завершён'} · {session.difficulty}{session.fork_from_turn ? ` · ветка с хода ${session.fork_from_turn}` : ''}</span></div><span className="profile-attempt-score">{session.result ? `${session.result.final_score}/100` : 'В процессе'}</span></div>

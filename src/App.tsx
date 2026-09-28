@@ -938,7 +938,7 @@ function App() {
             />
             <p className="card-description">{scenario?.description ?? 'Подготовка сценария переговоров.'}</p>
             <div className="scenario-meta">
-              <div><span>Роль</span><strong>{scenario?.character_role ?? 'Загрузка…'}</strong></div>
+              <div><span>Оппонент</span><strong>{scenario?.character_role ?? 'Загрузка…'}</strong></div>
               <div><span>Формат</span><strong>Диалог с AI-оппонентом</strong></div>
             </div>
 

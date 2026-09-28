@@ -298,14 +298,21 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .profile-stats span { color: #60748a; font-size: 11px; }
 .profile-stats strong { color: #1a3551; font: 700 30px 'Space Grotesk',sans-serif; }
 .profile-achievements { margin-bottom: 14px; }
-.profile-grid { display: grid; grid-template-columns: minmax(300px,.83fr) minmax(0,1.17fr); gap: 14px; align-items: start; }
+.profile-achievements .achievement-card > div { display: flex; flex: 1; flex-direction: column; align-self: stretch; min-width: 0; }
+.profile-achievements .achievement-state { display: block; margin-top: auto; }
+.profile-grid { position: relative; display: grid; grid-template-columns: minmax(300px,.83fr) minmax(0,1.17fr); gap: 14px; align-items: start; }
 @media (min-width: 1101px) {
   .profile-achievements .achievement-grid-profile { grid-template-columns: minmax(300px,.83fr) minmax(0,1.17fr); gap: 14px; margin-inline: -26px; }
   .profile-achievements .achievement-group { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; min-width: 0; padding-left: 26px; }
   .profile-achievements .achievement-group:last-child { grid-template-columns: repeat(3,minmax(0,1fr)); padding-left: 0; padding-right: 26px; }
+  .profile-history-panel { position: absolute; grid-column: 2; grid-row: 1; inset: 0; display: flex; flex-direction: column; }
+  .profile-history-panel .profile-history { flex: 1; min-height: 0; max-height: none; }
 }
 .profile-panel { padding: 25px; }
 .profile-panel h2 { margin: 10px 0 18px; color: #20364c; font: 600 22px 'Space Grotesk',sans-serif; }
+.profile-skills-panel { display: flex; flex-direction: column; }
+.profile-skill-actions { margin-top: auto; padding-top: 20px; }
+.profile-skill-actions .profile-analyze-button { margin-top: 0; }
 .profile-achievements h2 { margin-bottom: 0; }
 .profile-muted { margin: 14px 0 0; color: #61768b; font-size: 12px; line-height: 1.5; }
 .profile-radar-wrap { display: flex; flex-direction: column; align-items: center; }
@@ -342,6 +349,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .profile-techniques > .profile-muted { margin-top: -7px; font-size: 13px; }
 .profile-techniques-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 22px; }
 .profile-technique { min-width: 0; border: 1px solid #dbe6f3; border-radius: 20px; background: #f7faff; }
+.profile-technique:not([open]) { align-self: start; }
 .profile-technique summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 86px; padding: 18px 20px; list-style: none; cursor: pointer; }
 .profile-technique summary::-webkit-details-marker { display: none; }
 .profile-technique summary > span:first-child { display: flex; flex-direction: column; gap: 6px; }
