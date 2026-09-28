@@ -39,6 +39,7 @@ class SessionResponse(BaseModel):
     status: str = "active"
     scenario_id: uuid.UUID | None = None
     difficulty: str = "analyst"
+    duration_minutes: int = 10
     expires_at: datetime | None = None
     hints_used: int = 0
     hint_history: list[str] = Field(default_factory=list)
@@ -55,6 +56,7 @@ class SessionResponse(BaseModel):
 class CreateSessionRequest(BaseModel):
     scenario_id: uuid.UUID | None = None
     difficulty: Literal["beginner", "analyst", "advanced", "expert"] = "analyst"
+    duration_minutes: int = Field(default=10, ge=10, le=60, strict=True)
 
 
 class ForkSessionRequest(BaseModel):

@@ -24,7 +24,6 @@ from services.state import (
 
 
 logger = logging.getLogger(__name__)
-ROUND_DURATION = timedelta(minutes=10)
 _running_summaries: set[uuid.UUID] = set()
 _summary_semaphore = asyncio.Semaphore(1)
 
@@ -81,7 +80,10 @@ async def create_negotiation_session(
     db: AsyncSession,
     scenario_id: uuid.UUID | None = None,
     difficulty: str = "analyst",
+    duration_minutes: int = 10,
 ) -> tuple[NegotiationSession, Message]:
+    if not 10 <= duration_minutes <= 60:
+        raise ValueError("Session duration must be between 10 and 60 minutes")
     scenario: Scenario | None
     if scenario_id is None:
         scenario = await get_default_scenario(db)
@@ -93,7 +95,8 @@ async def create_negotiation_session(
 
     negotiation_session = NegotiationSession(
         difficulty=difficulty,
-        expires_at=datetime.now(timezone.utc) + ROUND_DURATION,
+        duration_minutes=duration_minutes,
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=duration_minutes),
     )
     negotiation_session.scenario_id = scenario.id
     negotiation_session.state = create_initial_state(scenario, difficulty)
@@ -162,6 +165,7 @@ async def fork_negotiation_session(
     branch = NegotiationSession(
         scenario_id=parent.scenario_id,
         difficulty=parent.difficulty,
+        duration_minutes=parent.duration_minutes,
         expires_at=parent.expires_at,
         hints_used=parent.hints_used,
         hint_history=list(parent.hint_history),

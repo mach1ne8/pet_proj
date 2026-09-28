@@ -43,6 +43,7 @@ async def serialize_session(db: AsyncSession, session, messages) -> SessionRespo
         status=session.status,
         scenario_id=session.scenario_id,
         difficulty=session.difficulty,
+        duration_minutes=session.duration_minutes,
         expires_at=session.expires_at,
         hints_used=session.hints_used,
         hint_history=session.hint_history,
@@ -80,6 +81,7 @@ async def create_session(
                 db,
                 request.scenario_id if request else None,
                 request.difficulty if request else "analyst",
+                request.duration_minutes if request else 10,
             )
         )
     except LookupError as error:
@@ -87,6 +89,8 @@ async def create_session(
             status_code=404,
             detail=str(error),
         ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
     created = await get_session(db, negotiation_session.id)
     return await serialize_session(db, created, [initial_message])

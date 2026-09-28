@@ -72,6 +72,7 @@ class NegotiationSession(Base):
     )
 
     difficulty: Mapped[str] = mapped_column(String(16), nullable=False, default="analyst")
+    duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=10, server_default="10")
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     hints_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     hint_history: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)

@@ -3,6 +3,7 @@ import { Achievements } from './Achievements'
 import Profile from './Profile'
 import ProfileAnalysis, { type ProfileReport } from './ProfileAnalysis'
 import { ScenarioPicker } from './ScenarioPicker'
+import { DurationDialog } from './DurationDialog'
 import './index.css'
 
 const SESSION_STORAGE_KEY = 'negotiation_session_id'
@@ -63,6 +64,7 @@ type SessionResponse = {
   status: 'active' | 'completed' | 'abandoned'
   scenario_id: string | null
   difficulty: Difficulty
+  duration_minutes: number
   expires_at: string | null
   hints_used: number
   hint_history: string[]
@@ -323,6 +325,7 @@ function App() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [sessionStatus, setSessionStatus] = useState<'active' | 'completed' | 'abandoned' | null>(null)
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
+  const [sessionDurationMinutes, setSessionDurationMinutes] = useState(10)
   const [remainingSeconds, setRemainingSeconds] = useState(600)
   const [hintsUsed, setHintsUsed] = useState(0)
   const [hintMessages, setHintMessages] = useState<string[]>([])
@@ -349,6 +352,7 @@ function App() {
   const [isOpponentThinking, setIsOpponentThinking] = useState(false)
   const [isSessionLoading, setIsSessionLoading] = useState(true)
   const [isStarting, setIsStarting] = useState(false)
+  const [isDurationDialogOpen, setIsDurationDialogOpen] = useState(false)
   const [isCompleting, setIsCompleting] = useState(false)
   const [sessionError, setSessionError] = useState<string | null>(null)
   const [startedAt, setStartedAt] = useState<number | null>(null)
@@ -406,6 +410,7 @@ function App() {
     setSessionId(data.session_id)
     setSessionStatus(data.status)
     setDifficulty(data.difficulty)
+    setSessionDurationMinutes(data.duration_minutes ?? 10)
     setExpiresAt(data.expires_at)
     setHintsUsed(data.hints_used)
     setHintMessages(data.hint_history ?? [])
@@ -437,7 +442,7 @@ function App() {
       if (!savedStartedAt) {
         localStorage.setItem(`${SESSION_STARTED_PREFIX}${data.session_id}`, String(sessionStartedAt))
       }
-      setRemainingSeconds(data.expires_at ? Math.max(0, Math.ceil((new Date(data.expires_at).getTime() - Date.now()) / 1000)) : 600)
+      setRemainingSeconds(data.expires_at ? Math.max(0, Math.ceil((new Date(data.expires_at).getTime() - Date.now()) / 1000)) : (data.duration_minutes ?? 10) * 60)
     }
   }
 
@@ -450,11 +455,11 @@ function App() {
     return data
   }
 
-  const createSession = async (scenarioId?: string) => {
+  const createSession = async (scenarioId: string, durationMinutes: number) => {
     const response = await fetch('/api/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scenario_id: scenarioId, difficulty }),
+      body: JSON.stringify({ scenario_id: scenarioId, difficulty, duration_minutes: durationMinutes }),
     })
     if (!response.ok) throw new Error(`Ошибка создания сессии: HTTP ${response.status}`)
     const data: SessionResponse = await response.json()
@@ -659,14 +664,15 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isOpponentThinking])
 
-  const startNegotiation = async () => {
+  const startNegotiation = async (durationMinutes: number) => {
     if (!scenario || isStarting) return
     try {
       setIsStarting(true)
       setSessionError(null)
       localStorage.setItem(DIFFICULTY_STORAGE_KEY, difficulty)
       localStorage.removeItem(SESSION_STORAGE_KEY)
-      await createSession(scenario.id)
+      await createSession(scenario.id, durationMinutes)
+      setIsDurationDialogOpen(false)
     } catch (error) {
       console.error('Ошибка старта:', error)
       setSessionError('Не удалось начать переговоры')
@@ -905,7 +911,7 @@ function App() {
         </button>}
       </header>
 
-      {sessionError && <div className="global-error">{sessionError}</div>}
+      {sessionError && !isDurationDialogOpen && <div className="global-error">{sessionError}</div>}
 
       {view === 'setup' && (
         <main className="setup-shell">
@@ -966,7 +972,7 @@ function App() {
                 </button>
               ))}
             </div>
-            <button className="primary-button start-button" onClick={() => void startNegotiation()} disabled={!scenario || isStarting}>
+            <button className="primary-button start-button" onClick={() => { setSessionError(null); setIsDurationDialogOpen(true) }} disabled={!scenario || isStarting}>
               {isStarting ? 'Подготавливаем…' : 'Начать переговоры'} <ArrowIcon />
             </button>
           </section>
@@ -1131,7 +1137,7 @@ function App() {
 
           <section className="summary-card bottom-summary">
             <div className="card-heading"><h2 className="summary-section-title">Детали сессии</h2><span>{state?.detected_tactics?.length ?? 0} техник</span></div>
-            <p className="round-duration">Время раунда: {formatDuration(Math.min(elapsedSeconds, 600))} · Подсказок SOS: {hintsUsed}</p>
+            <p className="round-duration">Время раунда: {formatDuration(Math.min(elapsedSeconds, sessionDurationMinutes * 60))} · Подсказок SOS: {hintsUsed}</p>
             <div className="techniques">{(state?.detected_tactics ?? []).map((tactic) => <span key={tactic}>{tacticLabels[tactic] ?? tactic}</span>)}{!state?.detected_tactics?.length && <span>Техники не зафиксированы</span>}</div>
             {result.key_moments?.length > 0 && <div className="key-moments"><span className="eyebrow">КЛЮЧЕВЫЕ МОМЕНТЫ</span>{result.key_moments.map((item) => <p key={item}>{item}</p>)}</div>}
             {sessionId && <div className="saved-notes"><label className="summary-section-title" htmlFor="summary-notes">Ваши заметки</label><textarea id="summary-notes" value={notes} onChange={(event) => saveNotes(event.target.value)} maxLength={5000} placeholder="Запишите, что получилось и что стоит попробовать иначе." /></div>}
@@ -1143,6 +1149,16 @@ function App() {
       )}
       {view === 'profile' && <Profile sessions={profileSessions.map((item) => ({ ...item, notes: localStorage.getItem(`${NOTES_STORAGE_PREFIX}${item.session_id}`) ?? item.notes ?? '' }))} scenarioNames={Object.fromEntries(scenarios.map((item) => [item.id, item.name]))} onOpen={(id) => void openProfileSession(id)} onSaveNotes={(id, value) => void saveProfileNotes(id, value)} onBack={closeProfile} onAnalyze={() => void startProfileAnalysis()} onOpenReport={openLastProfileReport} hasPreviousReport={!!lastProfileReportId} isAnalyzing={isStartingProfileReport} error={profileReportError} />}
       {view === 'profile-analysis' && <ProfileAnalysis report={profileReport} error={profileReportError} onBack={backToProfile} onRetry={() => void startProfileAnalysis()} isRetrying={isStartingProfileReport} />}
+      {view === 'setup' && isDurationDialogOpen && scenario && (
+        <DurationDialog
+          scenarioName={scenario.name}
+          difficultyLabel={selectedDifficulty.label}
+          isStarting={isStarting}
+          error={sessionError}
+          onClose={() => setIsDurationDialogOpen(false)}
+          onConfirm={(minutes) => void startNegotiation(minutes)}
+        />
+      )}
     </div>
   )
 }
