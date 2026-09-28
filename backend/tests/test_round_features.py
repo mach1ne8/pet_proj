@@ -1,5 +1,6 @@
 import unittest
 import uuid
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -166,6 +167,31 @@ class ScenarioProviderTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Руководитель команды", prompt)
         self.assertIn("Договориться об условиях", prompt)
         self.assertNotIn("закупщику", prompt)
+
+    async def test_turn_retries_invalid_model_json(self):
+        provider = OpenAICompatibleProvider()
+        provider._complete = AsyncMock(side_effect=[
+            '{"opponent_reply":',
+            json.dumps({
+                "opponent_reply": "Обсудим объём заказа.",
+                "evaluation": {
+                    "trust_delta": 1,
+                    "irritation_delta": 0,
+                    "interest_delta": 2,
+                    "tension_delta": 0,
+                    "openness_delta": 1,
+                    "risk_delta": 0,
+                    "detected_tactics": ["open_question"],
+                    "coach_message": "Уточните условия.",
+                },
+            }, ensure_ascii=False),
+        ])
+
+        turn = await provider.generate_turn(self.context("Руководитель команды"))
+
+        self.assertEqual(turn.opponent_reply, "Обсудим объём заказа.")
+        self.assertEqual(provider._complete.await_count, 2)
+        self.assertEqual(provider._complete.await_args.kwargs["max_tokens"], 320)
 
     async def test_mock_replies_match_character_role(self):
         provider = MockLLMProvider()

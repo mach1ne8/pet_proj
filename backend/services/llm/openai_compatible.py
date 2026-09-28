@@ -1,6 +1,7 @@
 import json
 
 import httpx
+from pydantic import ValidationError
 
 from core.config import (
     LLM_API_KEY,
@@ -196,8 +197,31 @@ class OpenAICompatibleProvider(LLMProvider):
         raw_result = await self._complete(
             messages,
             response_format={"type": "json_object"},
+            max_tokens=320,
         )
-        result = TurnResult.model_validate_json(raw_result)
+        try:
+            result = TurnResult.model_validate_json(raw_result)
+        except ValidationError:
+            # Local models can occasionally omit a field or truncate a JSON
+            # object. Give the turn one chance to produce a complete result.
+            result = TurnResult.model_validate_json(
+                await self._complete(
+                    [
+                        *messages,
+                        {
+                            "role": "system",
+                            "content": (
+                                "Return one complete JSON object with all required fields. "
+                                "Use integers from -10 to 10 for every delta and "
+                                "include opponent_reply, detected_tactics, and coach_message."
+                            ),
+                        },
+                    ],
+                    response_format={"type": "json_object"},
+                    max_tokens=320,
+                    temperature=0.5,
+                )
+            )
 
         previous_replies = {
             message.content.strip()
@@ -221,6 +245,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 await self._complete(
                     repair_messages,
                     response_format={"type": "json_object"},
+                    max_tokens=320,
                 )
             )
 

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
@@ -26,6 +27,11 @@ async def chat(
         raise HTTPException(
             status_code=404,
             detail=str(error),
+        ) from error
+    except ValidationError as error:
+        raise HTTPException(
+            status_code=502,
+            detail="Invalid model response",
         ) from error
     except ValueError as error:
         raise HTTPException(
